@@ -1,0 +1,51 @@
+name: PC em nuvem RDP do Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+    
+    steps:
+      - name: Habilitar Área de Trabalho Remota
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
+      
+      - name: Criar usuário e senha
+        run: |
+          $password = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 12 | % {[char]$_})
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "UsuarioRDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administradores" -Member "UsuarioRDP"
+          Add-LocalGroupMember -Group "Usuários da Área de Trabalho Remota" -Member "UsuarioRDP"
+          echo "SENHA=$password" >> $env:GITHUB_ENV
+      
+      - name: Baixar e instalar Tailscale
+        run: |
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale.exe"
+          .\tailscale.exe /quiet
+      
+      - name: Conectar ao Tailscale
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp-$env:GITHUB_RUN_ID
+        shell: powershell
+      
+      - name: Pegar IP e mostrar dados
+        run: |
+          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip
+          echo ""
+          echo "=========================================="
+          echo "✅ PC VIRTUAL PRONTO!"
+          echo "=========================================="
+          echo "📱 IP: $ip"
+          echo "👤 Usuário: UsuarioRDP"
+          echo "🔑 Senha: $env:SENHA"
+          echo "=========================================="
+          echo "Use esses dados no aplicativo 'Área de Trabalho Remota' do Windows!"
+          echo "=========================================="
+        shell: powershell
+
